@@ -1,0 +1,708 @@
+//	Author:			Deniz Sumer
+//  Student ID:		101527131
+//  Program:		Race Game
+//  Task:			HD Level Custom Code
+//  Date:			22/05/2017
+//  Description:	A GUI based race game, using SwinGame API.
+//					There are three different kinds of moving objects, cars, trees and lines.
+//					On top-left, speed gauge and distance meter shows speed and distance.
+//					Other racers randomly change lines, and show their intention with indicating lights.
+//					Other cars' color and lane is randomly determined by program.
+//					If player's car goes off the road, it turns upside down and game is resetted after that.
+//					If player's car crashed with other car, other car is damaged and turns on flickers.
+//					There is a "Developer Mode" in the game to monitor activities of moving objects.
+//					In this mode, rectangulars are drawed around each object with a number of index.
+
+program Race_v2;
+uses SwinGame, sgTypes, sgPhysics, sysUtils;
+
+const
+	WORLD = 'world.png';
+	SKY = 'sky.png';
+	GAUGE = 'gauge.png';
+	NEEDLE = 'needle.png';
+
+	AUDIBLACK = 'audi.png';
+	AUDISILVER = 'audi-silver.png';
+	AUDIBLUE = 'audi-blue.png';
+	AUDIGOLD = 'audi-gold.png';
+	AUDIRED = 'audi-red.png';
+
+	AUDIBLACK_DAMAGED = 'audi-damaged.png';
+	AUDISILVER_DAMAGED = 'audi-silver-damaged.png';
+	AUDIBLUE_DAMAGED = 'audi-blue-damaged.png';
+	AUDIGOLD_DAMAGED = 'audi-gold-damaged.png';
+	AUDIRED_DAMAGED = 'audi-red-damaged.png';
+
+	BRAKES = 'brakes.png';
+	SIGNALLEFT = 'signalleft.png';
+	SIGNALRIGHT = 'signalright.png';
+
+	TREE1 = 'tree1.png';
+	TREE2 = 'tree2.png';
+	TREE3 = 'tree3.png';
+
+	OBSBMP = 'obs.png';
+
+	CRASHED = 'crashed.png';
+	PAUSED = 'paused.png';
+	TEST = 'test.png';
+	NIGHT = 'night.png';
+	SLIGHTS = 'shortlights.png';
+
+	HORIZON = 200;
+
+	UPSIDEDOWNRIGHT = 180; 
+	UPSIDEDOWNLEFT = -180;
+
+	ROADLIMITRIGHT = 650;
+	ROADLIMITLEFT = 50;
+
+type
+	Lane = (left, left2center, center2left, center, center2right, right2center, right);
+	Plan = (steady, goleft, goright);
+
+	Position = record
+		X, Y : Single;
+	end;
+
+	Speed = record
+		spdY: Single;
+		dist: Single;
+	end;
+
+	Car = record
+		carId : Integer;
+		line: Lane;
+		pos : Position;
+		spd : Speed;
+		angle: Integer;
+		maker: Bitmap;
+		makerDamaged: Bitmap;
+		distBetween : Integer;
+		scaleRatio: Single;
+		lightStop: Boolean;
+		lightHead: Boolean;
+		lineChanged: Boolean;
+		health: Integer;
+		damaged: Boolean;
+		intention: Plan;
+	end;
+
+	Line = record
+		clr : Color;
+		Starts : Position;
+		Ends : Position;
+		width : Integer;
+		lineId : Integer;
+	end;
+
+	Treex = record
+		treeId : Integer;
+		treeType : String;
+		pos : Position;
+		side : String;
+		scaleRatio: Single;
+	end;
+
+	Smoke = record
+		pos: Position;
+		velocity: Position;
+	end;
+
+	GameData = record
+		PlaySpeed: Speed;
+		LeftLines: Array [0..4] of Line;
+		RightLines: Array [0..4] of Line;
+		Trees: Array [0..11] of Treex;
+		Racers: Array [0..12] of Car;
+		Smokes: Array [0..499] of Smoke;
+		dayTime: Boolean;
+		paused: Boolean;
+		devMode: Boolean;
+		timer: String;
+	end;
+
+function IncSpeed(var PlaySpeed:Speed): Single;
+begin
+	if playspeed.spdY < 0.5 then result := playspeed.spdY + 0.08;
+	if (playspeed.spdY >= 0.5) and (playspeed.spdY < 25) then result := playspeed.spdy * ((playspeed.spdy + 0.08) / playspeed.spdY);
+	if playspeed.spdY > 25 then result := playspeed.spdY;
+end;
+
+function DecSpeed(var PlaySpeed:Speed): Single;
+begin
+	if playspeed.spdY > 0 then result := playspeed.spdY / ((playspeed.spdy + 0.2) / playspeed.spdY);
+end;
+
+function CheckForCars(game: GameData): Integer;
+var
+	i: Integer;
+begin
+	for i := 1 to High(game.Racers) do
+	begin
+		if (game.racers[i].pos.y > 385) and (game.racers[i].pos.y < 575) then
+		begin
+			if ((game.racers[i].pos.X + 50) > (game.racers[0].pos.X + 50)) and ((game.racers[i].pos.X + 50) - (game.racers[0].pos.X + 50) < 95) then result := 2;
+			if ((game.racers[0].pos.X + 50) > (game.racers[i].pos.X + 50)) and ((game.racers[0].pos.X + 50) - (game.racers[i].pos.X + 50) < 95) then result := 1;
+			if (not result = 1) and (not result = 2) then result := 0;
+		end
+	end;
+end;
+
+procedure LoadResources();
+begin
+ 	LoadBitmapNamed('world', world);
+ 	LoadBitmapNamed('sky', sky);
+ 	LoadBitmapNamed('gauge', gauge);
+ 	LoadBitmapNamed('needle', needle);
+ 	LoadBitmapNamed('tree1', tree1);
+ 	LoadBitmapNamed('tree2', tree2);
+ 	LoadBitmapNamed('tree3', tree3); 	
+ 	LoadBitmapNamed('audi', audiblack);
+ 	LoadBitmapNamed('audisilver', audisilver);
+ 	LoadBitmapNamed('audiblue', audiblue);
+ 	LoadBitmapNamed('audigold', audigold);
+ 	LoadBitmapNamed('audired', audired);
+ 	LoadBitmapNamed('crashed', crashed);
+end;
+
+procedure RandomizeCarMaker(var racer: Car);
+var
+	r: Integer;
+begin
+	r := Random(5);
+	if r = 0 then
+	begin
+	racer.maker := LoadBitmapNamed('audigold', audigold);
+	racer.makerDamaged := LoadBitmapNamed('audigold_damaged', audigold_damaged);
+	end;
+	if r = 1 then
+	begin
+	racer.maker := LoadBitmapNamed('audisilver', audisilver);
+	racer.makerDamaged := LoadBitmapNamed('audisilver_damaged', audisilver_damaged);
+	end;
+	if r = 2 then
+	begin
+	racer.maker := LoadBitmapNamed('audiblue', audiblue);
+	racer.makerDamaged := LoadBitmapNamed('audiblue_damaged', audiblue_damaged);
+	end;
+	if r = 3 then
+	begin
+	racer.maker := LoadBitmapNamed('audi', audiblack);
+	racer.makerDamaged := LoadBitmapNamed('audi_damaged', audiblack_damaged);
+	end;
+	if r = 4 then
+	begin
+	racer.maker := LoadBitmapNamed('audired', audired);
+	racer.makerDamaged := LoadBitmapNamed('audired_damaged', audired_damaged);
+	end;
+end;
+
+procedure RandomizeCarLine(var racer: Car);
+var
+	r: Integer; 
+begin
+	r := Random(3);
+	if r = 0 then racer.line := Lane(0);
+	if r = 1 then racer.line := Lane(3);
+	if r = 2 then racer.line := Lane(6);
+end;
+
+procedure InitialiseRacer(var racer: Car);
+begin
+	racer.lineChanged := false;
+	racer.distBetween := 400;
+	racer.pos.Y := 200 - (racer.carId * racer.distBetween);
+	RandomizeCarLine(racer);
+	RandomizeCarMaker(racer);
+	if racer.line = Lane(0) then racer.pos.X := 350 - ((racer.pos.y-125)*0.549);
+	if racer.line = Lane(3) then racer.pos.X := 350;
+	if racer.line = Lane(6) then racer.pos.X := 350 - ((racer.pos.y-125)*0.549);
+end;
+
+procedure InitialiseRacers(var Racers: Array of Car);
+var
+	i: Integer;
+begin
+	for i := 1 to High(Racers) do
+		begin
+			Racers[i].damaged := false;
+			Racers[i].carId := i;
+			InitialiseRacer(Racers[i]);
+		end;
+end;
+
+procedure InitialiseLines(var LeftLines: Array of Line; var RightLines: Array of Line);
+var
+	i: Integer;
+begin
+	for i := 0 to High(LeftLines) do
+		begin
+			leftlines[i].lineId := i;
+			rightlines[i].lineId := i;
+			leftlines[i].starts.y := 150 + (leftlines[i].lineId * 100);
+			rightlines[i].starts.y := 150 + (rightlines[i].lineId * 100);
+		end;
+end;
+
+procedure InitialiseTree(var tree : Treex);
+	begin
+		tree.pos.y := 100 - (tree.treeId * 400);
+		if tree.treeId > 6 then tree.treeType := tree1;
+		if tree.treeId <= 6 then tree.treeType := tree2;
+		if not odd(tree.treeId) then
+		begin
+			tree.side := 'left';
+			tree.pos.X := 500 + ((tree.pos.y - 175) * 1.2125);
+		end;
+		if odd(tree.treeId) then
+		begin
+			tree.side := 'right';
+			tree.pos.X := 300 - ((tree.pos.y - 175) * 1.2125);
+		end;
+end;
+
+procedure InitialiseTrees(var Trees: Array of Treex);
+var
+	i: Integer;
+begin
+	for i := 0 to High(Trees) do // 13 trees treex200 treey 100
+		begin
+			trees[i].treeId := i;
+			InitialiseTree(Trees[i])
+		end;
+end;
+
+procedure InitialiseSmoke(var smoke: Smoke; var game: GameData);
+begin
+	smoke.pos.x := game.racers[0].pos.X -10 + Random(120);
+	smoke.pos.y := 600 + Random(10);
+	smoke.velocity.x := -1 + Random(3);
+	smoke.velocity.y := -2 - Random(5);
+end;
+
+procedure InitialiseSmokes(var smokes: Array of Smoke; var game: GameData);
+var
+	i: Integer;
+begin
+	for i := 0 to High(smokes) do
+	begin
+		InitialiseSmoke(smokes[i], game);
+	end;
+end;
+
+procedure InitialiseWorld(var game: GameData);
+begin
+	LoadResources();
+	CreateTimer(game.timer);
+	StartTimer(game.timer);
+	game.PlaySpeed.spdY := 0;
+	game.PlaySpeed.dist := 0;
+	game.Racers[0].pos.X := 350;
+	game.Racers[0].pos.Y := 475;
+	game.Racers[0].angle := 0;
+	game.Racers[0].maker := LoadBitmapNamed('audi', audiblack);
+	game.Racers[0].lightStop := false;
+	game.Racers[0].lightHead := false;
+	game.Racers[0].health := 100;
+	game.paused := false;
+	game.devMode := false;
+	InitialiseRacers(game.Racers);
+	InitialiseLines(game.LeftLines, game.RightLines);
+	InitialiseTrees(game.Trees);
+	InitialiseSmokes(game.smokes, game);
+	OpenGraphicsWindow('Race', 800, 600);
+ 	ClearScreen(colorWhite);
+  	ShowSwinGameSplashScreen();
+end;
+
+procedure DrawRightLine(var line: Line; var game: GameData);
+begin
+	line.Ends.Y := line.Starts.Y + 50;
+	line.Starts.X := 400 + ((line.Starts.Y - 175) * 0.2745);
+	line.Ends.X := 400 + ((line.Starts.Y - 125) * 0.2745);
+	DrawLine(colorYellow, line.Starts.X, line.Starts.Y, line.Ends.X, line.Ends.Y, OptionLineWidth(line.width));
+end;
+
+procedure DrawLeftLine(var line: Line; var game: GameData);
+begin
+	line.Ends.Y := line.Starts.Y + 50;
+	line.Starts.X := 400 - ((line.starts.y - 175) * 0.2745);
+	line.ends.X := 400 - ((line.starts.y - 125) * 0.2745);
+	DrawLine(colorYellow, line.starts.x, line.starts.y, line.ends.X, line.ends.Y, OptionLineWidth(line.width));
+end;
+
+procedure DrawLines(var LeftLines: Array of Line; var RightLines: Array of Line; var game: GameData);
+var
+	i: Integer;
+begin
+	for i := 0 to High(LeftLines) do
+		begin
+			leftlines[i].starts.y := leftlines[i].starts.y + game.PlaySpeed.spdY;
+			rightlines[i].starts.y := rightlines[i].starts.y + game.PlaySpeed.spdY;
+			leftlines[i].width := Round((leftlines[i].starts.y - 100) / 45);
+			rightlines[i].width := Round((rightlines[i].starts.y - 100) / 45);
+			DrawLeftLine(LeftLines[i], game);
+			DrawRightLine(RightLines[i], game);
+			if leftlines[i].starts.y > 250 + (leftlines[i].lineId * 100) then leftlines[i].starts.y := 150 + (leftlines[i].lineId * 100);
+			if rightlines[i].starts.y > 250 + (rightlines[i].lineId * 100) then rightlines[i].starts.y := 150 + (rightlines[i].lineId * 100);
+		end;
+end;
+
+procedure DrawGauge(var PlaySpeed:Speed);
+var
+	gaugeAngle : Single;
+begin
+	DrawBitmap('gauge',10,10);
+	playspeed.dist := playspeed.dist + (PlaySpeed.spdY / 100);
+
+	if playspeed.dist < 10 then
+	begin
+		DrawText('000', colorWhite, 'agencybold.ttf', 14, 98, 168);
+		DrawText(FloattoStr(Round(playspeed.dist)), colorWhite, 'agencybold.ttf', 14, 119, 168);
+	end;
+
+	if (playspeed.dist < 100) and (PlaySpeed.dist >= 10) then
+	begin
+		DrawText('00', colorWhite, 'agencybold.ttf', 14, 98, 168);
+		DrawText(FloattoStr(Round(playspeed.dist)), colorWhite, 'agencybold.ttf', 14, 112, 168);
+	end;
+
+	if (playspeed.dist < 1000) and (PlaySpeed.dist >= 100) then
+	begin
+		DrawText('0', colorWhite, 'agencybold.ttf', 14, 98, 168);
+		DrawText(FloattoStr(Round(playspeed.dist)), colorWhite, 'agencybold.ttf', 14, 105, 168);
+	end;
+
+	if (playspeed.dist > 1000) then
+	begin
+		DrawText(FloattoStr(Round(playspeed.dist)), colorWhite, 'agencybold.ttf', 14, 98, 168);
+	end;
+
+	gaugeAngle := ((playspeed.spdY * 9.6) + 60);
+	DrawBitmap('needle', 100, 40, OptionRotateBmp(gaugeAngle));
+end;
+
+procedure UpdateSmoke(var smoke: Smoke; var game:GameData);
+begin
+	smoke.pos.x := smoke.pos.x + smoke.velocity.x;
+	smoke.pos.y += smoke.velocity.y;
+	smoke.velocity.y += 0.2;
+	if (smoke.pos.y > 600) then InitialiseSmoke(smoke, game);
+end;
+
+procedure UpdateSmokes(var smokes: Array of Smoke; var game:GameData);
+var
+	i: Integer;
+begin
+	for i := 0 to High(smokes) do
+	begin
+		UpdateSmoke(smokes[i], game);
+	end;
+end;
+
+procedure DrawSmoke(var smoke: Smoke);
+begin
+	FillCircle(ColorGrey, smoke.pos.x, smoke.pos.y, 1);
+end;
+
+procedure DrawSmokes(var smokes: Array of Smoke);
+var
+	i: Integer;
+begin
+	for i := 0 to High(smokes) do
+	begin
+		DrawSmoke(smokes[i]);
+	end;
+end;
+
+
+
+procedure DrawGame(var game: GameData);
+begin
+	DrawBitmap('world', 0, 0);
+	DrawLines(game.LeftLines, game.RightLines, game);
+ 	DrawBitmap(game.racers[0].maker, game.racers[0].pos.X, game.racers[0].pos.Y, OptionRotateBmp(game.racers[0].angle));
+ 	if game.racers[0].lightStop = true then DrawBitmap(brakes, game.racers[0].pos.X, game.racers[0].pos.Y, OptionRotateBmp(game.racers[0].angle));
+ 	DrawSmokes(game.smokes)
+end;
+
+procedure Flashers(var racer: Car; var game: GameData);
+var
+	flick: Integer;
+begin
+	flick := trunc(TimerTicks(game.timer)/500);
+	if odd(flick) then
+	begin
+		if (racer.damaged = true) then DrawBitmap(signalleft, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.scaleRatio));
+		if (racer.damaged = true) then DrawBitmap(signalright, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.scaleRatio));
+	end;
+end;
+
+procedure Flickers(var racer: Car; var game: GameData);
+var
+	flick: Integer;
+begin
+	flick := trunc(TimerTicks(game.timer)/500);
+	if odd(flick) then
+	begin
+		if (racer.intention = Plan(2)) then DrawBitmap(signalright, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.scaleRatio));
+		if (racer.intention = Plan(1)) then DrawBitmap(signalleft, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.scaleRatio));
+	end;
+end;
+
+procedure ChangeLineCars(var racer: Car);
+begin
+	if racer.line = Lane(1) then racer.pos.x := racer.pos.X + 3;
+	if (racer.line = Lane(1)) and (racer.pos.X > 351) then
+	begin
+		racer.line := Lane(3);
+		racer.lineChanged := true;
+		racer.intention := Plan(0);
+	end;
+
+	if racer.line = Lane(5) then racer.pos.x := racer.pos.X - 3;
+	if (racer.line = Lane(5)) and (racer.pos.X < 349) then
+	begin
+		racer.line := Lane(3);
+		racer.lineChanged := true;
+		racer.intention := Plan(0);
+	end;
+
+	if racer.line = Lane(2) then racer.pos.x := racer.pos.X - 3;
+	if (racer.line = Lane(2)) and (racer.pos.X < 351 - ((racer.pos.y-125)*0.549)) then
+	begin
+		racer.line := Lane(0);
+		racer.lineChanged := true;
+		racer.intention := Plan(0);
+	end;
+
+	if racer.line = Lane(4) then racer.pos.x := racer.pos.X + 3;
+	if (racer.line = Lane(4)) and (racer.pos.X > 349 + ((racer.pos.y-125)*0.549)) then
+	begin
+		racer.line := Lane(6);
+		racer.lineChanged := true;
+		racer.intention := Plan(0);
+	end;
+end;
+
+procedure UpdateCars(var racer: Car; var game: GameData);
+var
+	relativeSpd: Single;
+begin
+	/////SCALING CAR BITMAPS/////
+	//flying cars
+	//racer.scaleRatio := 350/(racer.pos.Y);
+	if racer.pos.Y > 475 then racer.scaleRatio := 1 else racer.scaleRatio := (racer.pos.Y-125)/350;	
+	if racer.damaged = false then DrawBitmap(racer.maker, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.ScaleRatio));
+	if racer.damaged = true then DrawBitmap(racer.makerDamaged, racer.pos.X, racer.pos.Y, OptionScaleBmp(racer.scaleRatio, racer.ScaleRatio));
+	if racer.damaged = true then Flashers(racer, game);
+	
+	/////DEV MODE DISPLAY/////
+	if game.devMode = true then
+	begin
+		DrawRectangle(ColorBlack, racer.pos.X, racer.pos.Y, 100, 100);
+		DrawText(FloattoStr(racer.carId), colorYellow, 'arial.ttf', 14, racer.pos.X, racer.pos.Y);
+	end;
+
+	////SPEED CALCULATION/////
+	racer.spd.spdY := (10 - game.PlaySpeed.spdY);
+	relativeSpd := racer.spd.spdY / sqr(600/racer.pos.Y);
+	if racer.pos.Y < 150 then racer.pos.Y := racer.pos.Y - racer.spd.spdY;
+	if (racer.pos.Y >= 150) and (racer.pos.Y <= 600) then racer.pos.Y := racer.pos.Y - relativeSpd;
+	
+	/////ADJUSTING POS.X AS PER POS.Y/////
+	if racer.line = Lane(0) then racer.pos.X := 350 - ((racer.pos.y-125)*0.549);
+	if racer.line = Lane(6) then racer.pos.X := 350 + ((racer.pos.y-125)*0.549);
+	if racer.line = Lane(3) then racer.pos.x := 350;
+
+	////REPOSITION OF OFFSCREEN CARS/////
+	if racer.pos.Y > 600 then
+	begin
+		RandomizeCarLine(racer);
+		RandomizeCarMaker(racer);
+		racer.pos.y := 200 - (8 * racer.distBetween);
+		racer.damaged := false;
+	end;
+	if (racer.pos.Y > 600) or (racer.pos.Y < 100) then racer.lineChanged := false;
+	if (racer.pos.Y > 600) or (racer.pos.Y < 100) then racer.intention := Plan(0);
+
+	/////FLICKER/////
+	if (Round(racer.pos.Y) = 200) and (racer.lineChanged = false) then
+	begin
+		if Rnd(2) = 1 then
+		begin
+			if (racer.line = Lane(0)) then racer.intention := Plan(2);
+			if (racer.line = Lane(6)) then racer.intention := Plan(1);
+			if (racer.line = Lane(3)) and (odd(racer.carId)) then racer.intention := Plan(1);
+			if (racer.line = Lane(3)) and not (odd(racer.carId)) then racer.intention := Plan(2);
+		end;
+	end;
+	Flickers(racer, game);
+
+	/////CHANGE LINES//////
+	if (racer.pos.Y > 250) and (racer.lineChanged = false) then
+	begin
+		if (racer.line = Lane(0)) and (racer.intention = Plan(2)) then racer.line := Lane(1);
+		if (racer.line = Lane(6)) and (racer.intention = Plan(1)) then racer.line := Lane(5);
+		if (racer.line = Lane(3)) and (racer.intention = Plan(2)) then racer.line := Lane(4);
+		if (racer.line = Lane(3)) and (racer.intention = Plan(1)) then racer.line := Lane(2);
+	end;
+	ChangeLineCars(racer);
+
+end;
+
+procedure UpdateTree(var tree : Treex; var game: GameData);
+begin
+	if tree.pos.Y > 475 then tree.scaleRatio := 1 else tree.scaleRatio := (tree.pos.Y-110)/365;
+	DrawBitmap(tree.treeType, tree.pos.X, tree.pos.Y, OptionScaleBmp(tree.scaleRatio, tree.scaleRatio));
+	if game.devMode = true then
+	begin
+		DrawText(FloattoStr(tree.treeId), colorYellow, 'arial.ttf', 14, tree.pos.X, tree.pos.Y);
+		DrawRectangle(ColorBlack, tree.pos.X, tree.pos.Y, 100, 100);
+	end;
+
+	if (tree.pos.Y < 100) then tree.pos.Y := tree.pos.Y + game.playspeed.spdY;
+	if (tree.pos.Y >= 100) and (tree.pos.Y <= 600) then tree.pos.Y := tree.pos.Y + (game.playspeed.spdY / sqr(600/tree.pos.Y));
+	if tree.pos.Y > 600 then tree.pos.y := tree.pos.y - 4800;
+
+	if tree.side = 'left' then tree.pos.X := 500 + ((tree.pos.y - 175) * 1.2125);
+	if tree.side = 'right' then tree.pos.X := 200 - ((tree.pos.y - 175) * 1.2125);
+end;
+
+procedure ResetGame(var game: GameData);
+begin
+	game.PlaySpeed.spdY := 0;
+	game.Racers[0].pos.X := 350;
+	game.Racers[0].angle := 0;
+end;
+
+procedure Crash(var game: GameData);
+var
+	i: Integer;
+begin
+	if (game.Racers[0].pos.X > ROADLIMITRIGHT) or (game.Racers[0].pos.X < ROADLIMITLEFT) then
+	begin
+		if (game.Racers[0].pos.X > 350) then i := 1;
+		if (game.Racers[0].pos.X < 351) then i := -1;
+		while (game.Racers[0].angle = UPSIDEDOWNRIGHT + i) do
+			WriteLn(' ');
+			DrawBitmap(crashed, 100, 0); 
+			game.Racers[0].pos.X := game.Racers[0].pos.X + (2 * i);
+			game.Racers[0].angle := game.Racers[0].angle + (2 * i);
+			game.playSpeed.spdY := DecSpeed(game.playspeed);
+			if (game.Racers[0].angle > UPSIDEDOWNRIGHT) or (game.Racers[0].angle < UPSIDEDOWNLEFT) then delay(1000);
+			if (game.Racers[0].angle > UPSIDEDOWNRIGHT) or (game.Racers[0].angle < UPSIDEDOWNLEFT) then ResetGame(game);
+	end;
+	for i := 1 to High(game.racers) do
+		begin
+			if BitmapCollision(game.Racers[0].maker, game.Racers[0].pos.X, game.Racers[0].pos.Y, game.racers[i].maker, game.racers[i].pos.X, game.racers[i].pos.Y-10) then
+			begin
+				game.racers[i].damaged := true;
+				DrawBitmap(crashed, 100, 0);
+				game.PlaySpeed.spdY := 8;
+				game.playSpeed.spdY := DecSpeed(game.playspeed);
+				game.Racers[0].health := game.Racers[0].health - Round(game.PlaySpeed.spdY);
+			end;
+		end;
+end;
+
+procedure UpdateGame(var game: GameData);
+var
+	iRacer, iTree: Integer;
+begin
+	for iRacer := 1 to High(game.racers) do
+		begin
+			UpdateCars(game.racers[iRacer], game);
+		end;
+	for iTree := 0 to High(game.trees) do
+		begin
+			UpdateTree(game.trees[iTree], game)
+		end;
+	if game.devMode = false then DrawBitmap('sky', 0, 0);
+	DrawGauge(game.playspeed);
+	Crash(game);
+	UpdateSmokes(game.smokes, game);
+end;
+
+procedure SelectCar (var myCar:Car);
+begin
+	LoadResources();
+	ProcessEvents();
+	begin;
+	if KeyDown(Keypad1) then myCar.maker := LoadBitmapNamed('audi', audiblack);
+	if KeyDown(Keypad2) then myCar.maker := LoadBitmapNamed('audisilver', audisilver);
+	if KeyDown(Keypad3) then myCar.maker := LoadBitmapNamed('audiblue', audiblue);
+	if KeyDown(Keypad4) then myCar.maker := LoadBitmapNamed('audigold', audigold);
+	if KeyDown(Keypad5) then myCar.maker := LoadBitmapNamed('audired', audired);
+ 	end;
+end;
+
+procedure UserInput(var game: GameData);
+begin
+ 	ProcessEvents();
+ 	if	(game.Racers[0].pos.X >= ROADLIMITLEFT) and
+ 		(game.Racers[0].pos.X <= ROADLIMITRIGHT) then
+	begin
+		game.Racers[0].angle := 0;
+	 	if KeyDown(UpKey) then game.playspeed.spdY := IncSpeed(game.playspeed);
+		if KeyDown(DownKey) then game.playSpeed.spdY := DecSpeed(game.playspeed);
+		if KeyDown(DownKey) then  game.Racers[0].lightStop := true else game.Racers[0].lightStop := false;		
+		if KeyDown(RightKey) and not (CheckForCars(game) = 2) then game.Racers[0].pos.X := game.Racers[0].pos.X + (game.playspeed.spdY / 2);
+		if KeyDown(RightKey) and not (CheckForCars(game) = 2) then game.Racers[0].angle := + 10;
+		if KeyDown(LeftKey) and not (CheckForCars(game) = 1) then game.Racers[0].pos.X := game.Racers[0].pos.X - (game.playspeed.spdY / 2);
+		if KeyDown(LeftKey) and not (CheckForCars(game) = 1) then game.Racers[0].angle := - 10;
+		if KeyDown(RightCtrlKey) then SelectCar(game.Racers[0]);
+	end;
+end;
+
+procedure DeveloperControls(var game: GameData);
+begin
+		if KeyTyped(PKey) then game.paused := not (game.paused);
+		if KeyTyped(LeftCtrlKey) then if KeyTyped(FKey) then ToggleFullScreen();
+		if KeyTyped(TabKey) then ToggleWindowBorder();
+		if KeyDown(LeftCtrlKey) then if KeyTyped(QKey) then game.devMode := not (game.devMode);
+		if game.devMode = true then
+		begin
+		DrawText('FPS : ' + FloatToStr(GetFramerate()), colorBlack, 'arial.ttf', 14, 700, 15);
+		DrawText('Mouse X : ' + FloattoStr(MouseX()), colorBlack, 'arial.ttf', 14, 700, 30);
+		DrawText('Mouse Y : ' + FloattoStr(MouseY()), colorBlack, 'arial.ttf', 14, 700, 45);
+		end;
+		if (game.devMode = true) and KeyTyped(WKey) then
+		begin
+			WriteLn('_________MY CAR DATA_________');
+			WriteLn('MY CAR X POSN : ', FloattoStr(game.Racers[0].pos.X));
+			WriteLn('MY CAR SPD    : ', FloatToStr(game.playspeed.spdY));
+			WriteLn('_________RACER 1 DATA________');
+			WriteLn('Racer1 X POSN : ', FloatToStr(game.Racers[1].pos.X));
+			WriteLn('Racer1 Y POSN : ', FloatToStr(game.Racers[1].pos.Y));
+			WriteLn('Racer1 Line: ', game.Racers[1].line);
+			WriteLn('__________TREE 0 DATA________');
+			WriteLn('TREE 0 Y POSN : ', FloatToStr(game.Trees[0].pos.X));
+			WriteLn('TREE 0 X POSN : ', FloatToStr(game.Trees[0].pos.Y));
+			WriteLn('_____________________________');
+		end;
+end;
+
+procedure Main();
+var
+	game: GameData;
+begin
+	Randomize();
+	InitialiseWorld(game);	
+	repeat
+		if game.paused = false then
+		begin
+	 	DrawGame(game);
+	 	UpdateGame(game);
+	 	UserInput(game);
+	 	DeveloperControls(game);
+	 	RefreshScreen(60);
+	 	end;
+	until WindowCloseRequested();
+end;
+
+begin
+	Main();
+end.
